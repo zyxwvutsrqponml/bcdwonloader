@@ -1,0 +1,70 @@
+name: Download dump
+
+# Long-running (up to 6 hours) download of the Blockchair dump using the
+# released linux amd64 binary. Result is kept as an artifact for 7 days.
+#
+# Manual trigger: Actions -> Download dump -> Run workflow.
+# Optional repo secret BLOCKCHAIR_KEY unlocks full speed (no ~10 kB/s throttle).
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Blockchair dump URL"
+        default: "https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.tsv.gz"
+        required: true
+        type: string
+      connections:
+        description: "Parallel connections"
+        default: "16"
+        required: true
+        type: string
+      downloader_tag:
+        description: "bcdownloader release tag to use (linux amd64)"
+        default: "v0.1.0"
+        required: true
+        type: string
+      verify_gzip:
+        description: "Full gzip integrity check after download"
+        default: false
+        required: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    name: download
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 hours
+    steps:
+      - name: fetch released linux amd64 binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.downloader_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "bcdownloader-x86_64-unknown-linux-gnu.tar.gz" \
+            --output /tmp/bcd.tar.gz
+          tar -xzvf /tmp/bcd.tar.gz -C /tmp
+          /tmp/bcdownloader-x86_64-unknown-linux-gnu/bcdownloader --help
+
+      - name: download dump (up to 6h)
+        env:
+          BLOCKCHAIR_KEY: ${{ secrets.BLOCKCHAIR_KEY }}
+        run: |
+          mkdir -p dump
+          ARGS=(--no-progress -c "${{ inputs.connections }}" -o dump/blockchair_bitcoin_addresses_latest.tsv.gz)
+          if [ "${{ inputs.verify_gzip }}" = "true" ]; then ARGS+=(--verify-gzip); fi
+          /tmp/bcdownloader-x86_64-unknown-linux-gnu/bcdownloader "${{ inputs.url }}" "${ARGS[@]}"
+          ls -la dump/
+
+      - name: upload dump artifact (7 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockchair-bitcoin-addresses
+          path: dump/blockchair_bitcoin_addresses_latest.tsv.gz
+          retention-days: 7
+          compression-level: 0 # already .gz; skip recompression
+          if-no-files-found: error
