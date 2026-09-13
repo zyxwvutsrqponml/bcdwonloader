@@ -21,18 +21,19 @@ https://gz.blockchair.com/bitcoin/addresses/blockchair_bitcoin_addresses_latest.
 | Throttle | **10 kB/s per connection by default**. Unlock with `?key=SECRETKEY` from `info@blockchair.com` (see `https://gz.blockchair.com/README.html`). This tool compensates with N parallel Range connections and documents the key path. |
 | Total Blockchair data | >1 TB compressed, TSV, daily (`https://blockchair.com/dumps`) |
 
-Why parallel? At 10 kB/s, 1.77 GB single-stream takes ~49 hours. 16 connections ≈ 160 kB/s ≈ ~3 h. With a key, full speed.
+Why parallel? At 10 kB/s, 1.77 GB single-stream takes ~49 hours. 4 connections ≈ 40 kB/s ≈ ~12 h. With a key, full speed.
 
 Existing prior art (`blockchair-dl`) uses the same Range-parallel trick; `bcdownloader` adds resume, ETag validation, atomic merge, gzip verification, and strict CI.
 
 ## 2. Features (perfect & accurate)
 
-- **Parallel Range download** (`--connections 1..64`, default 16) with contiguous non-overlapping `bytes=start-end` split covering `[0, total)`.
+- **Parallel Range download** (`--connections 1..64`, default 4) with contiguous non-overlapping `bytes=start-end` split covering `[0, total)`.
+- **Sensible chunks**: 32 MiB per Range request by default (`--chunk-mib 32`), so the ~1.65 GiB dump needs only ~53 requests — no thousands of tiny requests.
 - **Resumable**: sidecar `*.parts/` chunk files, per-chunk resume, `--no-resume` to start fresh, stale-part detection on upstream change.
 - **Accurate**: `HEAD` + `GET bytes=0-0` probe, `Content-Length` / `Content-Range` parsing, `ETag` / `Last-Modified` conditional resume (`If-Match` / `If-Unmodified-Since`), final size check, gzip-magic check, optional full streaming gzip test (`--verify-gzip`) + TSV header sniff.
-- **Robust**: per-chunk exponential backoff retries (`--retries`, default 10), timeouts, `416`/`412` handling (upstream changed), atomic `*.gz.part` → final rename, merge verification.
-- **Key support**: `--key` / `BLOCKCHAIR_KEY` env / `?key=` in URL (no duplication).
-- **Progress**: `indicatif` bar with bytes, speed, ETA; `--no-progress` for CI.
+- **Robust**: per-chunk exponential backoff retries (`--retries`, default 20, 1s → 30s cap + jitter, backoff resets after progress), `Retry-After` honored on 429, limited long-backoff policy on 402 that stops with a clear message instead of retrying forever, `416`/`412` handling (upstream changed), atomic `*.gz.part` → final rename, merge verification.
+- **Key support**: `--key` / `BLOCKCHAIR_KEY` env / `?key=` in URL (no duplication). HTTP 402 is a server-side access/payment response: the downloader stops with a clear message instead of endlessly retrying, and lowering `--connections` does not fix a genuine 402.
+- **Progress**: `indicatif` bar with bytes, speed, ETA; a CI-friendly `[progress] XX.XX MiB / XXXX.XX MiB (XX.XX%)` line prints every 10 seconds from actual downloaded bytes (works in GitHub Actions logs); `--no-progress` hides bars for CI (progress lines still print).
 - **Decompress**: `--decompress` streams `foo.tsv.gz` → `foo.tsv` after verified download.
 - **Cross-platform**: Linux / Windows / macOS, tested in CI.
 
@@ -52,11 +53,11 @@ Download `bcdownloader-<target>.tar.gz/.zip` from Releases (built by `release.ym
 ## 4. Usage
 
 ```bash
-# Default: latest Bitcoin addresses, 16 connections
+# Default: latest Bitcoin addresses, 4 connections, 32 MiB chunks
 bcdownloader
 
-# Custom output + 32 connections + full gzip verify
-bcdownloader -o ./data/addrs.tsv.gz -c 32 --verify-gzip
+# Custom output + 4 connections + 32 MiB chunks + full gzip verify
+bcdownloader -o ./data/addrs.tsv.gz -c 4 --chunk-mib 32 --verify-gzip
 
 # With speed-unlock key (env preferred so key isn't in shell history)
 export BLOCKCHAIR_KEY=SECRETKEY
@@ -93,11 +94,11 @@ bcdownloader --help
 Every run prints a static header, then a live dashboard at 8 Hz:
 
 ```text
-== bcdownloader v0.1.0 ==
+== bcdownloader v0.2.0 ==
    URL    : .../blockchair_bitcoin_addresses_latest.tsv.gz
    output : blockchair_bitcoin_addresses_latest.tsv.gz
    size   : 1.65 GiB (1772480833 bytes)
-   conns  : 16 | resume : on | key : no (10 kB/s per conn)
+   conns  : 4 | resume : on | key : no (10 kB/s per conn)
 ------------------------------------------------------------
 ⠁ TOTAL [00:04:12] [###########>----------------] 412.5 MiB/1.65 GiB (25%) 1.62 MiB/s ETA 12:40 downloading
   ⠁ chunk #0  [########>-------------------] 28.1 MiB/110.8 MiB 102.4 KiB/s
@@ -107,8 +108,24 @@ Every run prints a static header, then a live dashboard at 8 Hz:
 [done] 1.65 GiB in 12:40 | avg 2.21 MiB/s | saved blockchair_bitcoin_addresses_latest.tsv.gz
 ```
 
+In CI / non-TTY logs you also get one line every 10 seconds:
+
+```text
+Starting download
+Total size: 1690.37 MiB (1772480833 bytes)
+Chunk size: 32.00 MiB (33554432 bytes)
+Connections: 4
+[progress] 36.81 MiB / 1690.37 MiB (2.18%)
+[progress] 42.94 MiB / 1690.37 MiB (2.54%)
+...
+HTTP 402 Payment Required
+The remote server rejected the request.
+Check Blockchair access credentials/key.
+Stopping instead of endlessly retrying.
+```
+
 - Top `TOTAL` bar: elapsed, wide bar, bytes, percent, live speed, ETA, phase (`downloading` → `merging` → `verifying` → `done`).
-- One `chunk #i` bar per connection (up to 16; beyond that workers run headless and `TOTAL` shows the worker count).
+- One `chunk #i` bar per worker (up to 16 visible; beyond that workers run headless and `TOTAL` shows the worker count).
 - Per-chunk states: byte range → `retry k/n` → `reconnecting` → `done` / `cached` / `failed`.
 - `--no-progress` hides all bars for CI logs; header + summary still print.
 
@@ -130,6 +147,13 @@ Pure helpers (`split_ranges`, `parse_content_range`, `apply_key_to_url`, gzip/TS
   - `cargo clippy --all-targets -- -D warnings`
   - `cargo test --verbose`
   - Matrix `cargo build` (debug+release) on `ubuntu/windows/macos` + `--help` smoke test, `Swatinem/rust-cache`, concurrency cancel, minimal `contents: read`.
+- `.github/workflows/download.yml` (manual dispatch, up to 6h):
+  - Checks out the repo, installs stable Rust, caches Cargo, and runs
+    `cargo build --release` — the dump is always fetched with a binary built
+    from the CURRENT source, never a stale release asset.
+  - Inputs: `url`, `connections` (default `"4"`), `chunk-mib` (default `"32"`),
+    `verify_gzip`. `BLOCKCHAIR_KEY` comes from the repo secret of the same
+    name and is never printed. A `[progress]` line is logged every 10s.
 - `.github/workflows/release.yml` (tag `v*`):
   - Builds `--locked --release` for `x86_64-linux`, `x86_64-windows`, `x86_64-macos`, `aarch64-macos`, packages `tar.gz`/`zip` + `sha256`, uploads artifacts, publishes GitHub Release with notes.
 

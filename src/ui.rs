@@ -1,10 +1,4 @@
 //! Realtime CLI UI: header, live multi-bar progress, summary.
-//!
-//! Design goals:
-//! - One overall bar (always) + one live bar per chunk (when it fits on screen).
-//! - Constant 8 Hz refresh so speed / ETA / % feel realtime.
-//! - Zero extra dependencies (only `indicatif`).
-//! - `--no-progress` hides everything for CI logs.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::time::Duration;
@@ -12,8 +6,7 @@ use std::time::Duration;
 /// Refresh interval for spinners / speed estimates.
 pub const TICK: Duration = Duration::from_millis(120);
 
-/// Show per-chunk bars only up to this many connections (beyond that the
-/// screen would scroll; overall bar + worker count is enough).
+/// Show per-worker bars only up to this many connections.
 pub const MAX_CHUNK_BARS: usize = 16;
 
 pub fn overall_style() -> ProgressStyle {
@@ -27,13 +20,12 @@ pub fn overall_style() -> ProgressStyle {
 
 pub fn chunk_style() -> ProgressStyle {
     ProgressStyle::with_template(
-        "  {spinner:.cyan} chunk {msg} [{bar:28.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec}",
+        "  {spinner:.cyan} {msg} [{bar:28.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec}",
     )
     .unwrap_or_else(|_| ProgressStyle::default_bar())
     .progress_chars("#>-")
 }
 
-/// Overall bar, registered on `mp` and ticking.
 pub fn add_overall(mp: &MultiProgress, total: u64) -> ProgressBar {
     let pb = mp.add(ProgressBar::new(total));
     pb.set_style(overall_style());
@@ -42,7 +34,6 @@ pub fn add_overall(mp: &MultiProgress, total: u64) -> ProgressBar {
     pb
 }
 
-/// One bar per chunk. Caller sets length/position afterwards.
 pub fn add_chunk(mp: &MultiProgress, label: String) -> ProgressBar {
     let pb = mp.add(ProgressBar::new(0));
     pb.set_style(chunk_style());
@@ -77,58 +68,10 @@ pub fn human_duration(secs: u64) -> String {
     }
 }
 
-/// Static header printed once before any bar ticks.
-pub fn print_header(
-    version: &str,
-    url_short: &str,
-    output: &str,
-    total: Option<u64>,
-    connections: usize,
-    resume: bool,
-    has_key: bool,
-) {
-    let size = total
-        .map(|t| format!("{} ({t} bytes)", human_bytes(t)))
-        .unwrap_or_else(|| "unknown".to_string());
-    println!("== bcdownloader v{version} ==");
-    println!("   URL    : {url_short}");
-    println!("   output : {output}");
-    println!("   size   : {size}");
-    println!(
-        "   conns  : {connections} | resume : {} | key : {}",
-        if resume { "on" } else { "off" },
-        if has_key {
-            "yes"
-        } else {
-            "no (10 kB/s per conn)"
-        },
-    );
-    println!("------------------------------------------------------------");
-}
-
-/// One-line live footer summary.
-pub fn print_summary(saved_as: &str, bytes: u64, elapsed_secs: u64) {
-    let avg = match bytes.checked_div(elapsed_secs) {
-        Some(v) => human_bytes(v) + "/s",
-        None => "-".to_string(),
-    };
-    println!("------------------------------------------------------------");
-    println!(
-        "[done] {} in {} | avg {} | saved {}",
-        human_bytes(bytes),
-        human_duration(elapsed_secs),
-        avg,
-        saved_as
-    );
-}
-
 /// Shorten a long URL for the header (keep host + last segment + key hidden).
 pub fn short_url(url: &str) -> String {
     const KEEP: usize = 72;
-    let mut s = url.to_string();
-    if let Some(pos) = s.find("key=") {
-        s.replace_range(pos.., "key=***");
-    }
+    let s = crate::ranges::redact_url(url);
     if s.len() > KEEP {
         let tail: String = s
             .chars()
@@ -142,6 +85,21 @@ pub fn short_url(url: &str) -> String {
     } else {
         s
     }
+}
+
+pub fn print_summary(saved_as: &str, bytes: u64, elapsed_secs: u64) {
+    let avg = match bytes.checked_div(elapsed_secs) {
+        Some(v) => human_bytes(v) + "/s",
+        None => "-".to_string(),
+    };
+    println!("------------------------------------------------------------");
+    println!(
+        "[done] {} in {} | avg {} | saved {}",
+        human_bytes(bytes),
+        human_duration(elapsed_secs),
+        avg,
+        saved_as
+    );
 }
 
 #[cfg(test)]

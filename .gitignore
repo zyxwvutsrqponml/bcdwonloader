@@ -6,6 +6,13 @@
 *.parts/
 *.tsv.gz
 *.tsv
+dump/
+
+# Secrets (use env / GitHub Secrets, never commit)
+.env
+.env.*
+*.pem
+*.key
 
 # IDE
 .idea/

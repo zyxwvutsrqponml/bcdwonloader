@@ -1,10 +1,12 @@
 name: Download dump
 
-# Long-running (up to 6 hours) download of the Blockchair dump using the
-# released linux amd64 binary. Result is kept as an artifact for 7 days.
+# Long-running (up to 6 hours) download of the Blockchair dump, built from the
+# CURRENT source in this repo (never a stale prebuilt binary), so Rust fixes
+# always take effect. Result is kept as an artifact for 7 days.
 #
 # Manual trigger: Actions -> Download dump -> Run workflow.
 # Optional repo secret BLOCKCHAIR_KEY unlocks full speed (no ~10 kB/s throttle).
+# The key is passed via env only and never printed (logs show `key=***`).
 
 on:
   workflow_dispatch:
@@ -15,18 +17,13 @@ on:
         required: true
         type: string
       connections:
-        description: "Parallel connections"
-        default: "16"
+        description: "Parallel connections (worker pool, max in-flight requests)"
+        default: "4"
         required: true
         type: string
-      downloader_tag:
-        description: "bcdownloader release tag (informational)"
-        default: "v0.1.0"
-        required: true
-        type: string
-      binary_url:
-        description: "Released linux amd64 tarball URL"
-        default: "https://github.com/merajal746-oss/bcdwonloader/releases/download/v0.1.0/bcdownloader-x86_64-unknown-linux-gnu.tar.gz"
+      chunk_mib:
+        description: "Chunk size in MiB (one Range request per chunk)"
+        default: "32"
         required: true
         type: string
       verify_gzip:
@@ -38,26 +35,56 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   download:
     name: download
     runs-on: ubuntu-latest
     timeout-minutes: 360 # 6 hours
     steps:
-      - name: fetch released linux amd64 binary
+      - name: checkout (fixed source)
+        uses: actions/checkout@v4
+
+      - name: install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: build downloader from current source
+        run: cargo build --release --verbose
+
+      - name: smoke test freshly built binary
         run: |
-          curl -sSL -o /tmp/bcd.tar.gz "${{ inputs.binary_url }}"
-          tar -xzvf /tmp/bcd.tar.gz -C /tmp
-          /tmp/bcdownloader-x86_64-unknown-linux-gnu/bcdownloader --help
+          ./target/release/bcdownloader --help
+          ./target/release/bcdownloader --help | grep -qi "blockchair"
 
       - name: download dump (up to 6h)
         env:
           BLOCKCHAIR_KEY: ${{ secrets.BLOCKCHAIR_KEY }}
         run: |
           mkdir -p dump
-          ARGS=(--no-progress -c "${{ inputs.connections }}" -o dump/blockchair_bitcoin_addresses_latest.tsv.gz)
+          ARGS=(
+            "${{ inputs.url }}"
+            -c "${{ inputs.connections }}"
+            --chunk-mib "${{ inputs.chunk_mib }}"
+            -o dump/blockchair_bitcoin_addresses_latest.tsv.gz
+          )
           if [ "${{ inputs.verify_gzip }}" = "true" ]; then ARGS+=(--verify-gzip); fi
-          /tmp/bcdownloader-x86_64-unknown-linux-gnu/bcdownloader "${{ inputs.url }}" "${ARGS[@]}"
+          # Indicatif bars auto-hide in CI (no TTY); a `[progress]` line still
+          # prints every 10 seconds. Do NOT add --no-progress: it is not needed
+          # and would only hide the interactive bars Cron/Termux users rely on.
+          ./target/release/bcdownloader "${ARGS[@]}"
           ls -la dump/
 
       - name: upload dump artifact (7 days)
