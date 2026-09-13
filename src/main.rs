@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use bcdownloader::{apply_key_to_url, chunk_file_name, has_gzip_magic, range_len, split_ranges, DEFAULT_URL};
+use bcdownloader::{
+    apply_key_to_url, chunk_file_name, has_gzip_magic, range_len, split_ranges, DEFAULT_URL,
+};
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar};
-use reqwest::header::{
-    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, ETAG, LAST_MODIFIED, RANGE,
-};
+use reqwest::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, ETAG, LAST_MODIFIED, RANGE};
 use reqwest::{Client, StatusCode};
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -29,7 +29,11 @@ struct Cli {
     url: String,
 
     /// Output file path.
-    #[arg(short, long, default_value = "blockchair_bitcoin_addresses_latest.tsv.gz")]
+    #[arg(
+        short,
+        long,
+        default_value = "blockchair_bitcoin_addresses_latest.tsv.gz"
+    )]
     output: PathBuf,
 
     /// Parallel connections (HTTP Range chunks). 1 = single stream.
@@ -84,7 +88,9 @@ struct Probe {
 fn build_client(timeout_secs: u64) -> Result<Client> {
     let version = env!("CARGO_PKG_VERSION");
     Client::builder()
-        .user_agent(format!("bcdownloader/{version} (+blockchair-dump-downloader)"))
+        .user_agent(format!(
+            "bcdownloader/{version} (+blockchair-dump-downloader)"
+        ))
         .timeout(Duration::from_secs(timeout_secs))
         .connect_timeout(Duration::from_secs(15))
         .tcp_keepalive(Duration::from_secs(30))
@@ -250,9 +256,15 @@ async fn download_range(
                     if let Some(c) = chunk.as_ref() {
                         c.abandon_with_message("failed");
                     }
-                    return Err(anyhow!("GET {range_header} failed after {retries} retries: {e:#}"));
+                    return Err(anyhow!(
+                        "GET {range_header} failed after {retries} retries: {e:#}"
+                    ));
                 }
-                warn!("GET {range_header} error ({e:#}), retry {}/{}", attempt + 1, retries);
+                warn!(
+                    "GET {range_header} error ({e:#}), retry {}/{}",
+                    attempt + 1,
+                    retries
+                );
                 if let Some(c) = chunk.as_ref() {
                     c.set_message(format!("retry {}/{}", attempt + 1, retries));
                 }
@@ -262,7 +274,7 @@ async fn download_range(
             }
         };
         let status = resp.status();
-        if status == StatusCode::REQUESTED_RANGE_NOT_SATISFIABLE {
+        if status == StatusCode::RANGE_NOT_SATISFIABLE {
             // Already complete (race) or file shrank upstream.
             if have == expected {
                 return Ok(());
@@ -285,7 +297,11 @@ async fn download_range(
                 }
                 return Err(anyhow!("unexpected HTTP {status} for {range_header}"));
             }
-            warn!("unexpected HTTP {status} for {range_header}, retry {}/{}", attempt + 1, retries);
+            warn!(
+                "unexpected HTTP {status} for {range_header}, retry {}/{}",
+                attempt + 1,
+                retries
+            );
             if let Some(c) = chunk.as_ref() {
                 c.set_message(format!("retry {}/{}", attempt + 1, retries));
             }
@@ -442,8 +458,7 @@ async fn verify_gzip_full(path: PathBuf) -> Result<u64> {
         if !first_done {
             first_line = String::from_utf8_lossy(&line_buf).to_string();
         }
-        if !first_line.is_empty()
-            && !bcdownloader::looks_like_blockchair_addresses_tsv(&first_line)
+        if !first_line.is_empty() && !bcdownloader::looks_like_blockchair_addresses_tsv(&first_line)
         {
             warn!("first TSV line does not look like Blockchair addresses header: {first_line:?}");
         }
@@ -548,9 +563,9 @@ async fn main() -> Result<()> {
         if cli.no_resume && parts_dir.exists() {
             fs::remove_dir_all(&parts_dir).await.ok();
         }
-        fs::create_dir_all(&parts_dir).await.with_context(|| {
-            format!("create parts dir {}", parts_dir.display())
-        })?;
+        fs::create_dir_all(&parts_dir)
+            .await
+            .with_context(|| format!("create parts dir {}", parts_dir.display()))?;
 
         // If a previous run used a different chunk count/total, stale chunks
         // would corrupt the merge — detect expected sizes and wipe on mismatch.
@@ -559,7 +574,10 @@ async fn main() -> Result<()> {
             let p = parts_dir.join(chunk_file_name(i, ranges.len()));
             if let Ok(m) = fs::metadata(&p).await {
                 if m.len() > range_len(*s, *e) {
-                    warn!("stale parts detected (upstream changed?), wiping {}", parts_dir.display());
+                    warn!(
+                        "stale parts detected (upstream changed?), wiping {}",
+                        parts_dir.display()
+                    );
                     fs::remove_dir_all(&parts_dir).await.ok();
                     fs::create_dir_all(&parts_dir).await?;
                     break;
@@ -608,7 +626,11 @@ async fn main() -> Result<()> {
                 c.set_position(if already {
                     expected
                 } else {
-                    fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0).min(expected)
+                    fs::metadata(&dest)
+                        .await
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                        .min(expected)
                 });
                 if already {
                     c.finish_with_message("cached");

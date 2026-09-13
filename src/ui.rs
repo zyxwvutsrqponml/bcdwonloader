@@ -97,7 +97,11 @@ pub fn print_header(
     println!(
         "   conns  : {connections} | resume : {} | key : {}",
         if resume { "on" } else { "off" },
-        if has_key { "yes" } else { "no (10 kB/s per conn)" },
+        if has_key {
+            "yes"
+        } else {
+            "no (10 kB/s per conn)"
+        },
     );
     println!("------------------------------------------------------------");
 }
@@ -127,7 +131,14 @@ pub fn short_url(url: &str) -> String {
         s.replace_range(pos.., "key=***");
     }
     if s.len() > KEEP {
-        let tail: String = s.chars().rev().take(KEEP - 3).collect::<String>().chars().rev().collect();
+        let tail: String = s
+            .chars()
+            .rev()
+            .take(KEEP - 3)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         format!("...{tail}")
     } else {
         s

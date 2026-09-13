@@ -20,13 +20,9 @@ pub fn apply_key_to_url(url: &str, key: &str) -> Result<String> {
     if key.is_empty() {
         return Ok(url.to_string());
     }
-    let mut parsed =
-        url::Url::parse(url).map_err(|e| anyhow!("invalid URL {url:?}: {e}"))?;
+    let mut parsed = url::Url::parse(url).map_err(|e| anyhow!("invalid URL {url:?}: {e}"))?;
     // Don't duplicate if user already embedded ?key= in the URL.
-    if parsed
-        .query_pairs()
-        .any(|(k, _)| k == "key")
-    {
+    if parsed.query_pairs().any(|(k, _)| k == "key") {
         return Ok(parsed.to_string());
     }
     parsed.query_pairs_mut().append_pair("key", key);
@@ -107,7 +103,10 @@ mod tests {
 
     #[test]
     fn split_even() {
-        assert_eq!(split_ranges(100, 4), vec![(0, 24), (25, 49), (50, 74), (75, 99)]);
+        assert_eq!(
+            split_ranges(100, 4),
+            vec![(0, 24), (25, 49), (50, 74), (75, 99)]
+        );
     }
 
     #[test]

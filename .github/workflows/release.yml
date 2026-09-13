@@ -34,7 +34,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --locked --release --target ${{ matrix.target }} --verbose
+      - run: cargo build --release --target ${{ matrix.target }} --verbose
       - name: package (unix)
         if: runner.os != 'Windows'
         shell: bash
