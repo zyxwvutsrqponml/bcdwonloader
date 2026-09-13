@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn chunk_naming_is_orderable() {
-        let mut names: Vec<_> = (0..16).map(|i| chunk_file_name(i, 16)).collect();
+        let names: Vec<_> = (0..16).map(|i| chunk_file_name(i, 16)).collect();
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted);

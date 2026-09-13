@@ -675,13 +675,13 @@ async fn main() -> Result<()> {
         // Verify all chunks then merge atomically.
         let count = chunk_count;
         let expected_ranges = split_ranges(total, connections);
-        for i in 0..count {
+        for (i, (s, e)) in expected_ranges.iter().enumerate() {
+            let (s, e) = (*s, *e);
             let p = parts_dir.join(chunk_file_name(i, count));
             let m = fs::metadata(&p)
                 .await
                 .with_context(|| format!("missing {}", p.display()))?;
-            // Recompute expected from authoritative ranges.
-            let (s, e) = expected_ranges[i];
+            // Expected size from authoritative ranges.
             if m.len() != range_len(s, e) {
                 return Err(anyhow!(
                     "chunk {i} incomplete: {} vs {} bytes",

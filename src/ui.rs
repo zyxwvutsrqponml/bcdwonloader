@@ -108,10 +108,9 @@ pub fn print_header(
 
 /// One-line live footer summary.
 pub fn print_summary(saved_as: &str, bytes: u64, elapsed_secs: u64) {
-    let avg = if elapsed_secs > 0 {
-        human_bytes(bytes / elapsed_secs) + "/s"
-    } else {
-        "-".to_string()
+    let avg = match bytes.checked_div(elapsed_secs) {
+        Some(v) => human_bytes(v) + "/s",
+        None => "-".to_string(),
     };
     println!("------------------------------------------------------------");
     println!(
