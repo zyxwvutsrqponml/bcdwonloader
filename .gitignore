@@ -1,0 +1,14 @@
+# Rust
+/target/
+
+# Partials / downloads
+*.part
+*.parts/
+*.tsv.gz
+*.tsv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

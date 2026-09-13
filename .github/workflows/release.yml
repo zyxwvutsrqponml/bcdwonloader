@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: release (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --release --target ${{ matrix.target }} --verbose
+      - name: package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          STAGE="bcdownloader-${{ matrix.target }}"
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/bcdownloader" "$STAGE/"
+          cp README.md "$STAGE/" 2>/dev/null || true
+          tar -czvf "$STAGE.tar.gz" "$STAGE"
+          shasum -a 256 "$STAGE.tar.gz" > "$STAGE.tar.gz.sha256"
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $Stage = "bcdownloader-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $Stage -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/bcdownloader.exe" "$Stage/"
+          if (Test-Path README.md) { Copy-Item README.md "$Stage/" }
+          Compress-Archive -Path "$Stage/*" -DestinationPath "$Stage.zip" -Force
+          (Get-FileHash "$Stage.zip" -Algorithm SHA256).Hash + "  $Stage.zip" | Out-File "$Stage.zip.sha256" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bcdownloader-${{ matrix.target }}
+          path: |
+            bcdownloader-*.tar.gz
+            bcdownloader-*.sha256
+            bcdownloader-*.zip
+          if-no-files-found: error
+
+  github-release:
+    name: publish github release
+    needs: [build-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
