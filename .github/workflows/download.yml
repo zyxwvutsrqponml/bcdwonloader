@@ -20,8 +20,13 @@ on:
         required: true
         type: string
       downloader_tag:
-        description: "bcdownloader release tag to use (linux amd64)"
+        description: "bcdownloader release tag (informational)"
         default: "v0.1.0"
+        required: true
+        type: string
+      binary_url:
+        description: "Released linux amd64 tarball URL"
+        default: "https://github.com/merajal746-oss/bcdwonloader/releases/download/v0.1.0/bcdownloader-x86_64-unknown-linux-gnu.tar.gz"
         required: true
         type: string
       verify_gzip:
@@ -40,13 +45,8 @@ jobs:
     timeout-minutes: 360 # 6 hours
     steps:
       - name: fetch released linux amd64 binary
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "${{ inputs.downloader_tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern "bcdownloader-x86_64-unknown-linux-gnu.tar.gz" \
-            --output /tmp/bcd.tar.gz
+          curl -sSL -o /tmp/bcd.tar.gz "${{ inputs.binary_url }}"
           tar -xzvf /tmp/bcd.tar.gz -C /tmp
           /tmp/bcdownloader-x86_64-unknown-linux-gnu/bcdownloader --help
 
