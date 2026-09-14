@@ -1,0 +1,62 @@
+name: Upload artifact to R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Completed GitHub Actions run containing the artifact"
+        required: true
+        default: "34769701426"
+        type: string
+      artifact_name:
+        description: "Artifact name to download"
+        required: true
+        default: "blockchair-bitcoin-addresses"
+        type: string
+      object_key:
+        description: "R2 object key"
+        required: true
+        default: "blockchair_bitcoin_addresses_latest.tsv.gz"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  upload:
+    name: upload artifact to R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download artifact from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+          name: ${{ inputs.artifact_name }}
+          path: artifact
+
+      - name: Upload artifact to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          OBJECT_KEY: ${{ inputs.object_key }}
+        run: |
+          set -euo pipefail
+          file="$(find artifact -type f -print -quit)"
+          test -n "$file"
+          aws s3 cp "$file" "s3://${R2_BUCKET}/${OBJECT_KEY}" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto \
+            --only-show-errors
+          aws s3api head-object \
+            --bucket "$R2_BUCKET" \
+            --key "$OBJECT_KEY" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto >/dev/null
+          echo "Uploaded ${OBJECT_KEY} to R2 bucket ${R2_BUCKET}."
